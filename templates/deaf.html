@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Hand Slinger - Deaf Person Mode. Show hand signs to get real-time text translation.">
+    <title>Hand Slinger — Deaf Person Mode</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤟</text></svg>">
+</head>
+<body>
+
+    <div class="app-layout" id="app-layout">
+
+        <!-- ====== TOP BAR ====== -->
+        <div class="top-bar">
+            <div class="top-bar-left">
+                <a href="/" class="back-btn" id="back-btn">← Back</a>
+                <span class="top-bar-logo">HAND <span class="gradient-text">SLINGER</span></span>
+            </div>
+            <div class="top-bar-center">
+                <div class="status-badge" id="status-badge">
+                    <span class="status-dot"></span>
+                    <span id="status-text">Initializing...</span>
+                </div>
+            </div>
+            <div class="top-bar-right">
+                <div class="fullscreen-hint">
+                    Press <kbd>F</kbd> fullscreen &nbsp;|&nbsp; <kbd>ESC</kbd> exit
+                </div>
+            </div>
+        </div>
+
+        <!-- ====== MAIN CONTENT ====== -->
+        <div class="deaf-container">
+            <div class="deaf-main">
+
+                <!-- Camera Area -->
+                <div class="camera-area">
+                    <div class="camera-feed-container" id="camera-container">
+                        <video id="camera-feed" autoplay playsinline muted></video>
+                        <canvas id="landmark-canvas"></canvas>
+
+                        <!-- No Camera Message -->
+                        <div class="no-camera-msg" id="no-camera-msg" style="display: none;">
+                            <div class="icon">📷</div>
+                            <h3>Camera Access Required</h3>
+                            <p>Please allow camera access to enable hand sign detection. Make sure your camera is connected and permissions are granted.</p>
+                        </div>
+
+                        <!-- Detection Status Overlay -->
+                        <div class="detection-overlay">
+                            <div class="detection-status" id="detection-status">
+                                <span class="det-dot"></span>
+                                <span id="detection-text">Waiting for hands...</span>
+                            </div>
+                        </div>
+
+                        <!-- Current Prediction Overlay -->
+                        <div class="prediction-display" id="prediction-display" style="display: none;">
+                            <div class="prediction-text">
+                                <div class="prediction-word" id="prediction-word">—</div>
+                                <div class="prediction-confidence" id="prediction-confidence">Confidence: 0%</div>
+                                <div class="confidence-bar-container">
+                                    <div class="confidence-bar" id="confidence-bar" style="width: 0%;"></div>
+                                </div>
+                                <div class="top-candidates-container" id="top-candidates-container"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ====== SIDE PANEL (Tabs: History & Dictionary) ====== -->
+                <div class="translation-panel" id="translation-panel">
+                    <div class="panel-tabs">
+                        <button class="panel-tab-btn active" id="tab-history-btn" onclick="switchPanelTab('history')">
+                            <span>📝 History</span>
+                            <span class="badge" id="history-count-badge">0</span>
+                        </button>
+                        <button class="panel-tab-btn" id="tab-dict-btn" onclick="switchPanelTab('dict')">
+                            <span>📖 Signs Guide</span>
+                        </button>
+                    </div>
+
+                    <!-- Tab 1: Translation History -->
+                    <div class="panel-tab-content active" id="tab-history-content">
+                        <div class="translation-header">
+                            <h3>Live Translations</h3>
+                            <button class="clear-history-btn" id="clear-history-btn">Clear</button>
+                        </div>
+                        <div class="translation-history" id="translation-history">
+                            <div class="translation-empty" id="translation-empty">
+                                <div class="translation-empty-icon">👋</div>
+                                <p><strong>How to use:</strong><br>
+                                1. Show a hand sign clearly<br>
+                                2. Hold steady for 1-2 seconds<br>
+                                3. Detected text appears here<br><br>
+                                <em>Tip: Check the <strong>Signs Guide</strong> tab to view reference gestures!</em></p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tab 2: Signs Dictionary Guide -->
+                    <div class="panel-tab-content" id="tab-dict-content" style="display: none;">
+                        <div class="dict-header">
+                            <input type="text" id="dict-search-input" class="dict-search" placeholder="🔍 Search signs (e.g. want, hi)..." oninput="filterSignsDictionary()">
+                        </div>
+                        <div class="dict-list" id="dict-signs-list">
+                            <div class="loading-signs">Loading signs...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bottom Control Bar -->
+            <div class="control-bar">
+                <div class="control-bar-left">
+                    <button class="ctrl-btn active" id="detect-btn" title="Toggle Detection">
+                        <span id="detect-icon">🧠</span>
+                        <span class="btn-tooltip">AI Detection</span>
+                    </button>
+                    <button class="ctrl-btn" id="cam-btn" title="Toggle Camera">
+                        <span id="cam-icon">📷</span>
+                        <span class="btn-tooltip">Camera</span>
+                    </button>
+                    <div class="divider"></div>
+                </div>
+
+                <div class="control-bar-center">
+                    <button class="ctrl-btn" id="fullscreen-btn" title="Fullscreen (F)">
+                        <span>⛶</span>
+                        <span class="btn-tooltip">Fullscreen (F)</span>
+                    </button>
+                </div>
+
+                <div class="control-bar-right">
+                    <div class="divider"></div>
+                    <button class="ctrl-btn danger" id="end-btn" title="Leave">
+                        📞
+                        <span class="btn-tooltip">Leave</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast" id="toast"></div>
+
+    <!-- MediaPipe Hands JS (CDN) -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.js" crossorigin="anonymous"></script>
+
+    <script src="/static/js/deaf.js"></script>
+</body>
+</html>

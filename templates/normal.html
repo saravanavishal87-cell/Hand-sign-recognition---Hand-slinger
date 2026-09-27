@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Hand Slinger - Normal Person Mode. Speak or type to translate your words into sign language.">
+    <title>Hand Slinger — Hearing Person Mode</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤟</text></svg>">
+</head>
+<body>
+
+    <div class="app-layout" id="app-layout">
+
+        <!-- ====== TOP BAR ====== -->
+        <div class="top-bar">
+            <div class="top-bar-left">
+                <a href="/" class="back-btn" id="back-btn">← Back</a>
+                <span class="top-bar-logo">HAND <span class="gradient-text">SLINGER</span></span>
+            </div>
+            <div class="top-bar-center">
+                <div class="status-badge" id="status-badge">
+                    <span class="status-dot"></span>
+                    <span id="status-text">Ready</span>
+                </div>
+            </div>
+            <div class="top-bar-right">
+                <span style="font-size: 13px; color: var(--text-muted);">Hearing Person Mode</span>
+            </div>
+        </div>
+
+        <!-- ====== MAIN CONTENT ====== -->
+        <div class="meet-container">
+
+            <!-- Video / Main Area -->
+            <div class="meet-main">
+                <div class="meet-video-area">
+
+                    <!-- Camera Feed -->
+                    <div class="video-feed-container" id="video-container">
+                        <video id="camera-feed" autoplay playsinline muted></video>
+                        <div class="video-placeholder" id="video-placeholder">
+                            <div class="video-placeholder-icon">📹</div>
+                            <p>Camera will appear here</p>
+                        </div>
+                        <div class="video-name-tag">You</div>
+
+                        <!-- Speech Active Indicator -->
+                        <div class="speech-indicator" id="speech-indicator">
+                            <div class="speech-waves">
+                                <div class="wave-bar"></div>
+                                <div class="wave-bar"></div>
+                                <div class="wave-bar"></div>
+                                <div class="wave-bar"></div>
+                                <div class="wave-bar"></div>
+                            </div>
+                            <span>Listening...</span>
+                        </div>
+                    </div>
+
+                    <!-- Live Speech Text Overlay -->
+                    <div class="message-display" id="message-display" style="display: none;">
+                        <div class="speech-text" id="speech-text-display"></div>
+                    </div>
+                </div>
+
+                <!-- Bottom Control Bar -->
+                <div class="control-bar">
+                    <div class="control-bar-left">
+                        <button class="ctrl-btn" id="mic-btn" title="Toggle Microphone">
+                            <span id="mic-icon">🎤</span>
+                            <span class="btn-tooltip">Microphone</span>
+                        </button>
+                        <button class="ctrl-btn" id="cam-btn" title="Toggle Camera">
+                            <span id="cam-icon">📷</span>
+                            <span class="btn-tooltip">Camera</span>
+                        </button>
+                        <div class="divider"></div>
+                    </div>
+
+                    <div class="text-input-area">
+                        <div class="text-input-wrapper">
+                            <input type="text" class="text-input" id="text-input"
+                                   placeholder="Type a message to translate to sign language..."
+                                   autocomplete="off">
+                        </div>
+                        <button class="send-btn" id="send-btn" title="Send">
+                            ➤
+                        </button>
+                    </div>
+
+                    <div class="control-bar-right">
+                        <div class="divider"></div>
+                        <button class="ctrl-btn danger" id="end-btn" title="Leave">
+                            📞
+                            <span class="btn-tooltip">Leave</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ====== SIDE PANEL - Sign Translation ====== -->
+            <div class="sign-panel" id="sign-panel">
+                <div class="sign-panel-header">
+                    <h3>🤟 Sign Translation</h3>
+                    <span class="badge-count" id="sign-count">0</span>
+                </div>
+                <div class="sign-panel-content" id="sign-panel-content">
+                    <div class="sign-panel-empty" id="sign-panel-empty">
+                        <div class="sign-panel-empty-icon">🤟</div>
+                        <p>Speak or type words to see their<br>sign language translation here</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast" id="toast"></div>
+
+    <script src="/static/js/normal.js"></script>
+</body>
+</html>

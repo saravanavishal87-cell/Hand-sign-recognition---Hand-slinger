@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Hand Slinger — Two-way communication platform between hearing and deaf persons powered by Computer Vision & Deep Learning.">
+    <title>Hand Slinger — Sign Language Communication</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤟</text></svg>">
+</head>
+<body>
+
+    <div class="app-layout" id="app-layout">
+
+        <!-- ============ TOP BAR ============ -->
+        <header class="top-bar">
+            <div class="top-bar-left">
+                <span class="top-bar-logo">HAND <span class="gradient-text">SLINGER</span></span>
+            </div>
+
+            <!-- Single-Website Mode Switcher -->
+            <div class="top-bar-center">
+                <nav class="mode-switcher" id="mode-switcher" aria-label="Mode Selection">
+                    <button class="mode-tab-btn active" id="btn-mode-normal" onclick="setAppMode('normal')">
+                        <span>🗣️ Hearing Mode</span>
+                    </button>
+                    <button class="mode-tab-btn" id="btn-mode-deaf" onclick="setAppMode('deaf')">
+                        <span>🤟 Deaf Mode</span>
+                    </button>
+                    <button class="mode-tab-btn" id="btn-mode-dual" onclick="setAppMode('dual')">
+                        <span>👥 Two-Way Meet</span>
+                    </button>
+                </nav>
+            </div>
+
+            <div class="top-bar-right">
+                <div class="status-badge" id="status-badge">
+                    <span class="status-dot"></span>
+                    <span id="status-text">Ready</span>
+                </div>
+                <div class="fullscreen-hint" title="Keyboard Shortcut">
+                    <kbd>F</kbd> Fullscreen &nbsp;|&nbsp; <kbd>ESC</kbd> Exit
+                </div>
+                <button class="ctrl-btn" id="top-fullscreen-btn" onclick="toggleAppFullscreen()" title="Toggle Fullscreen (F)">
+                    <span>⛶</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- ============ VIEW 1: HEARING PERSON MODE (GOOGLE MEET) ============ -->
+        <main class="mode-section" id="section-normal">
+            <div class="meet-container">
+                <div class="meet-main">
+                    <div class="meet-video-area">
+                        <div class="video-feed-container" id="normal-video-container">
+                            <video id="normal-camera-feed" autoplay playsinline muted></video>
+                            <div class="video-placeholder" id="normal-video-placeholder">
+                                <div class="video-placeholder-icon">🗣️</div>
+                                <h3>Hearing Person Video</h3>
+                                <p>Speak with your microphone or type below to generate signs</p>
+                            </div>
+                            <div class="video-name-tag">Hearing Companion</div>
+
+                            <!-- Speech Wave Indicator -->
+                            <div class="speech-indicator" id="speech-indicator">
+                                <div class="speech-waves">
+                                    <div class="wave-bar"></div>
+                                    <div class="wave-bar"></div>
+                                    <div class="wave-bar"></div>
+                                    <div class="wave-bar"></div>
+                                    <div class="wave-bar"></div>
+                                </div>
+                                <span>Listening...</span>
+                            </div>
+                        </div>
+
+                        <!-- Live Spoken/Typed Text Display Overlay -->
+                        <div class="message-display" id="normal-message-display" style="display: none;">
+                            <div class="speech-text" id="normal-speech-text"></div>
+                        </div>
+                    </div>
+
+                    <!-- Horizontal Sign Language Sequence Strip (Below Video, Left to Right in Order) -->
+                    <div class="sign-sequence-container" id="normal-sign-container">
+                        <div class="sign-sequence-header">
+                            <span class="sign-seq-title">🤟 Sign Language Sequence (Left to Right in Order):</span>
+                            <div class="sign-seq-actions">
+                                <span class="sign-seq-count" id="normal-sign-count">0 signs</span>
+                                <button class="clear-seq-btn" onclick="clearSignSequence()">Clear</button>
+                            </div>
+                        </div>
+                        <div class="sign-sequence-track" id="normal-sign-track">
+                            <div class="sign-seq-empty" id="normal-sign-empty">
+                                <span>💬 Speak into the microphone or type below — matched sign images will appear here in left-to-right sequence.</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Bottom Controls (Google Meet Style) -->
+                    <div class="control-bar">
+                        <div class="control-bar-left">
+                            <button class="ctrl-btn" id="normal-mic-btn" onclick="toggleSpeechRecognition()" title="Toggle Microphone">
+                                <span id="normal-mic-icon">🎤</span>
+                                <span class="btn-tooltip">Microphone (Speech to Sign)</span>
+                            </button>
+                            <button class="ctrl-btn" id="normal-cam-btn" onclick="toggleNormalCamera()" title="Toggle Camera">
+                                <span id="normal-cam-icon">📷</span>
+                                <span class="btn-tooltip">Camera</span>
+                            </button>
+                            <div class="divider"></div>
+                        </div>
+
+                        <div class="text-input-area">
+                            <div class="text-input-wrapper">
+                                <input type="text" class="text-input" id="normal-text-input"
+                                       placeholder="Type a message (e.g. 'hello, want water, thank you')..."
+                                       autocomplete="off" onkeypress="if(event.key==='Enter') sendNormalText()">
+                            </div>
+                            <button class="send-btn" id="normal-send-btn" onclick="sendNormalText()" title="Send">
+                                ➤
+                            </button>
+                        </div>
+
+                        <div class="control-bar-right">
+                            <div class="divider"></div>
+                            <button class="ctrl-btn" onclick="setAppMode('deaf')" title="Switch to Deaf Mode">
+                                🤟
+                                <span class="btn-tooltip">Deaf Mode</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- ============ VIEW 2: DEAF PERSON MODE (AI SIGN DETECTION) ============ -->
+        <main class="mode-section" id="section-deaf" style="display: none;">
+            <div class="deaf-container-cinematic">
+                <div class="deaf-screen-wrapper">
+                    <!-- Top Video Feed Area -->
+                    <div class="camera-feed-container" id="deaf-camera-container">
+                        <video id="deaf-camera-feed" autoplay playsinline muted></video>
+                        <canvas id="deaf-landmark-canvas"></canvas>
+
+                        <!-- No Camera Notice -->
+                        <div class="no-camera-msg" id="deaf-no-camera-msg" style="display: none;">
+                            <div class="icon">📷</div>
+                            <h3>Camera Access Required</h3>
+                            <p>Please allow webcam access so MediaPipe can detect your hand signs in real time.</p>
+                        </div>
+
+                        <!-- Top Status Overlay -->
+                        <div class="detection-overlay">
+                            <div class="detection-status" id="deaf-detection-status">
+                                <span class="det-dot"></span>
+                                <span id="deaf-detection-text">Waiting for hands...</span>
+                            </div>
+                        </div>
+
+                        <!-- Detection Line: Progresses only when hand is detected & held steady -->
+                        <div class="detection-line-wrapper">
+                            <div class="detection-line-info">
+                                <span class="detection-line-label" id="deaf-scan-status-text">Waiting for hand sign...</span>
+                                <span class="countdown-badge" id="deaf-scan-badge">No Hand</span>
+                            </div>
+                            <div class="detection-scan-track">
+                                <div class="detection-scan-fill" id="deaf-scan-line" style="width: 0%;"></div>
+                            </div>
+                        </div>
+
+                        <!-- Head Movement Confirmation Overlay (Nod = Correct, Shake = Wrong) -->
+                        <div class="confirmation-overlay" id="deaf-confirm-overlay" style="display: none;">
+                            <div class="confirm-card">
+                                <div class="confirm-header">
+                                    <span class="confirm-badge">Detected Sign</span>
+                                </div>
+                                <div class="confirm-word-box">
+                                    <span class="confirm-word" id="deaf-confirm-word">—</span>
+                                </div>
+                                <div class="confirm-instructions">
+                                    <div class="confirm-inst-item yes-rule">
+                                        <span class="inst-icon">↕️</span>
+                                        <div>
+                                            <strong>Nod Head (UP & DOWN)</strong>
+                                            <span>Correct / Confirm</span>
+                                        </div>
+                                    </div>
+                                    <div class="confirm-inst-divider"></div>
+                                    <div class="confirm-inst-item no-rule">
+                                        <span class="inst-icon">↔️</span>
+                                        <div>
+                                            <strong>Shake Head (LEFT & RIGHT)</strong>
+                                            <span>Wrong / Cancel</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- Head Movement Gauge -->
+                                <div class="head-gauge-box">
+                                    <div class="head-gauge-track">
+                                        <div class="head-gauge-dot" id="head-gauge-dot"></div>
+                                    </div>
+                                    <span class="head-gauge-label" id="head-gauge-status">Nod head (Up & Down) if correct</span>
+                                </div>
+                                <!-- Action Buttons -->
+                                <div class="confirm-actions">
+                                    <button class="confirm-action-btn btn-yes" onclick="resolveHeadConfirmation(true)" title="Confirm Word">
+                                        <span>✓</span> Correct (Nod)
+                                    </button>
+                                    <button class="confirm-action-btn btn-no" onclick="resolveHeadConfirmation(false)" title="Reject Word">
+                                        <span>✗</span> Wrong (Shake)
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- BELOW SCREEN: Clean Live Translated Sentence Display (No History Box) -->
+                    <div class="deaf-subtitles-bar" id="deaf-subtitles-bar">
+                        <div class="subtitles-header">
+                            <div class="subtitles-title-group">
+                                <span class="subtitles-icon">💬</span>
+                                <span class="subtitles-heading">Translated Text</span>
+                                <span class="subtitles-badge" id="deaf-word-count-badge">0 words</span>
+                            </div>
+                            <div class="subtitles-actions">
+                                <button class="sub-action-btn" onclick="speakCurrentSentence()" title="Read sentence aloud">
+                                    <span>🔊</span> Speak
+                                </button>
+                                <button class="sub-action-btn" onclick="copyCurrentSentence()" title="Copy to clipboard">
+                                    <span>📋</span> Copy
+                                </button>
+                                <button class="sub-action-btn danger" onclick="clearCurrentSentence()" title="Clear translated text">
+                                    <span>🗑️</span> Clear
+                                </button>
+                                <button class="sub-action-btn secondary" onclick="openSignsModal()" title="View 114 Signs Guide">
+                                    <span>📖</span> Signs Guide (114)
+                                </button>
+                            </div>
+                        </div>
+                        <div class="subtitles-display" id="deaf-translated-sentence">
+                            <span class="subtitles-empty">Perform a hand sign and nod your head (Up & Down) to confirm words here...</span>
+                        </div>
+                        <div class="confirmed-words-history" id="deaf-confirmed-words-strip"></div>
+                    </div>
+                </div>
+
+                <!-- Bottom Control Bar -->
+                <div class="control-bar">
+                    <div class="control-bar-left">
+                        <button class="ctrl-btn active" id="deaf-detect-btn" onclick="toggleDeafDetection()" title="Toggle AI Detection">
+                            <span id="deaf-detect-icon">🧠</span>
+                            <span class="btn-tooltip">AI Detection</span>
+                        </button>
+                        <button class="ctrl-btn" id="deaf-cam-btn" onclick="toggleDeafCamera()" title="Toggle Camera">
+                            <span id="deaf-cam-icon">📷</span>
+                            <span class="btn-tooltip">Camera</span>
+                        </button>
+                        <div class="divider"></div>
+                    </div>
+
+                    <div class="control-bar-center">
+                        <button class="ctrl-btn" onclick="toggleAppFullscreen()" title="Fullscreen (F)">
+                            <span>⛶</span>
+                            <span class="btn-tooltip">Fullscreen (F)</span>
+                        </button>
+                    </div>
+
+                    <div class="control-bar-right">
+                        <div class="divider"></div>
+                        <button class="ctrl-btn" onclick="setAppMode('normal')" title="Switch to Hearing Mode">
+                            🗣️
+                            <span class="btn-tooltip">Hearing Mode</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- ============ VIEW 3: TWO-WAY MEET (DUAL LIVE COMMUNICATION) ============ -->
+        <main class="mode-section" id="section-dual" style="display: none;">
+            <div class="dual-meet-layout">
+                <div class="dual-meet-main">
+                    <div class="dual-grid">
+
+                        <!-- Tile 1: Hearing Participant -->
+                        <div class="dual-tile hearing-tile">
+                            <div class="tile-header">
+                                <span class="tile-badge">🗣️ Hearing Companion</span>
+                                <span class="tile-status" id="dual-speech-status">Mic Ready</span>
+                            </div>
+                            <div class="dual-tile-body">
+                                <div class="dual-sign-output" id="dual-sign-output">
+                                    <div class="dual-sign-empty" id="dual-sign-empty">
+                                        <div style="font-size:36px;opacity:0.5;">💬</div>
+                                        <p>Speak into mic or type below.<br>Signs will appear here for the deaf companion.</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="dual-tile-footer">
+                                <button class="ctrl-btn" id="dual-mic-btn" onclick="toggleDualMic()" title="Mic">
+                                    <span id="dual-mic-icon">🎤</span>
+                                </button>
+                                <input type="text" class="text-input" id="dual-text-input"
+                                       placeholder="Type to show sign language..."
+                                       onkeypress="if(event.key==='Enter') sendDualText()">
+                                <button class="send-btn" onclick="sendDualText()">➤</button>
+                            </div>
+                        </div>
+
+                        <!-- Tile 2: Deaf Participant -->
+                        <div class="dual-tile deaf-tile">
+                            <div class="tile-header">
+                                <span class="tile-badge">🤟 Deaf Companion</span>
+                                <span class="tile-status" id="dual-deaf-status">AI Tracking Active</span>
+                            </div>
+                            <div class="dual-tile-body video-wrapper">
+                                <video id="dual-camera-feed" autoplay playsinline muted></video>
+                                <canvas id="dual-landmark-canvas"></canvas>
+                                <div class="prediction-display dual-pred-overlay" id="dual-prediction-display" style="display:none;">
+                                    <div class="prediction-text">
+                                        <div class="prediction-word" id="dual-pred-word">—</div>
+                                        <div class="prediction-confidence" id="dual-pred-conf">0%</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="dual-tile-footer">
+                                <div class="dual-caption-bar" id="dual-live-caption">
+                                    <span style="color:var(--text-muted);">Show hand signs to webcam to generate captions...</span>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- Shared Conversation Dialogue Panel -->
+                <aside class="dual-dialogue-panel">
+                    <div class="translation-header">
+                        <h3>💬 Live Dialogue</h3>
+                        <button class="clear-history-btn" onclick="clearDualDialogue()">Clear</button>
+                    </div>
+                    <div class="dual-dialogue-list" id="dual-dialogue-list">
+                        <div class="translation-empty" id="dual-dialogue-empty">
+                            <div class="translation-empty-icon">🤝</div>
+                            <p><strong>Two-Way Communication</strong><br>
+                            Hearing words convert to signs.<br>
+                            Deaf signs convert to text.<br>
+                            Everything connects seamlessly in real time!</p>
+                        </div>
+                    </div>
+                </aside>
+            </div>
+        </main>
+
+    </div>
+
+    <!-- Signs Guide Modal (114 Indian Sign Language Guide) -->
+    <div class="signs-modal" id="signs-modal" style="display: none;">
+        <div class="signs-modal-backdrop" onclick="closeSignsModal()"></div>
+        <div class="signs-modal-dialog">
+            <div class="signs-modal-header">
+                <div class="signs-modal-title">
+                    <span>📖</span>
+                    <h3>114 Indian Sign Language Guide</h3>
+                </div>
+                <button class="modal-close-btn" onclick="closeSignsModal()">✕</button>
+            </div>
+            <div class="signs-modal-search-box">
+                <input type="text" id="modal-dict-search" class="dict-search"
+                       placeholder="🔍 Search 114 signs (want, hello, thank, help)..."
+                       oninput="filterModalDictionary(this.value)">
+            </div>
+            <div class="dict-list" id="modal-dict-list">
+                <div class="loading-signs" style="padding:16px;color:var(--text-muted);">Loading signs dictionary...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast" id="toast"></div>
+
+    <!-- MediaPipe Hands, Face Detection & Camera Utils (CDN) -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_detection@0.4.1646425229/face_detection.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.js" crossorigin="anonymous"></script>
+
+    <!-- Main Unified Application Script -->
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
