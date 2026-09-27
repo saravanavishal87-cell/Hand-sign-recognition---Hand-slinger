@@ -18,3 +18,8 @@ ENV/
 .DS_Store
 Thumbs.db
 *.log
+
+# Dataset & large training caches
+dataset/
+*.zip
+model/landmarks_cache.pkl
