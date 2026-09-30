@@ -41,6 +41,11 @@ let headHistory = []; // [{ x, y, time }]
 let offscreenCanvas = null;
 let offscreenCtx = null;
 
+// Dedicated User Face Locking State (eliminates multi-face confusion during nodding)
+let lockedUserFace = null;       // { x, y, noseX, noseY, w, h, lastSeen, score, locked }
+let lastSigningHandPos = null;   // { x, y, time }
+let activeFaceList = [];         // All faces detected in current frame for HUD rendering
+
 // Confirmed Translated Sentence (Displayed below the screen)
 let confirmedSentenceWords = [];
 
@@ -426,6 +431,13 @@ function renderDeafSkeleton(results) {
     const numHands = results.multiHandLandmarks.length;
     if (statusElem) statusElem.textContent = `${numHands} hand${numHands > 1 ? 's' : ''} detected`;
 
+    // Record primary signing hand position to correlate with user's face
+    if (primaryHand && primaryHand.length > 0) {
+        const wx = (primaryHand[0].x + (primaryHand[9]?.x || primaryHand[0].x)) / 2;
+        const wy = (primaryHand[0].y + (primaryHand[9]?.y || primaryHand[0].y)) / 2;
+        lastSigningHandPos = { x: wx, y: wy, time: now };
+    }
+
     // Measure hand steadiness (displacement between consecutive frames)
     let displacement = 0;
     if (prevHandLandmarks) {
@@ -529,12 +541,16 @@ function handleDeafPrediction(data) {
     awaitingHeadConfirmation = true;
     pendingProposedWord = proposed;
     headHistory = [];
+    lockedUserFace = null;
+    activeFaceList = [];
 
     // Show Confirmation Overlay with proposed word
     const overlay = document.getElementById('deaf-confirm-overlay');
     const wordElem = document.getElementById('deaf-confirm-word');
     const gaugeStatus = document.getElementById('head-gauge-status');
     const gaugeDot = document.getElementById('head-gauge-dot');
+    const targetBadge = document.getElementById('deaf-face-target-badge');
+    const targetText = document.getElementById('deaf-face-target-text');
 
     if (wordElem) wordElem.textContent = proposed.replace(/_/g, ' ');
     if (gaugeStatus) gaugeStatus.textContent = 'Move head UP & DOWN to Confirm (or Shake to Cancel)';
@@ -542,35 +558,410 @@ function handleDeafPrediction(data) {
         gaugeDot.style.transform = 'translate(0px, 0px)';
         gaugeDot.style.background = '#38bdf8';
     }
+    if (targetBadge && targetText) {
+        targetBadge.classList.remove('locked');
+        targetText.textContent = 'Locking on your face...';
+    }
     if (overlay) overlay.style.display = 'flex';
+}
+
+// ============ MULTI-FACE FILTERING & DEDICATED FACE LOCKING ============
+
+// Normalizes MediaPipe FaceDetection results safely across different formats
+function normalizeFaceDetection(det) {
+    if (!det) return null;
+    let w = 0.2, h = 0.2, cx = 0.5, cy = 0.35;
+    if (det.boundingBox) {
+        w = det.boundingBox.width || 0.2;
+        h = det.boundingBox.height || 0.2;
+        if (det.boundingBox.xCenter !== undefined) {
+            cx = det.boundingBox.xCenter;
+            cy = det.boundingBox.yCenter;
+        } else if (det.boundingBox.xMin !== undefined) {
+            cx = det.boundingBox.xMin + w / 2;
+            cy = det.boundingBox.yMin + h / 2;
+        }
+    }
+    // Landmark 2 is the nose tip in MediaPipe FaceDetection (most stable anchor for nodding)
+    let noseX = cx;
+    let noseY = cy;
+    if (det.landmarks && det.landmarks[2]) {
+        noseX = det.landmarks[2].x;
+        noseY = det.landmarks[2].y;
+        if (cx === undefined) cx = noseX;
+        if (cy === undefined) cy = noseY;
+    }
+    const score = (det.score && det.score[0] !== undefined) ? det.score[0] : 0.85;
+    return {
+        x: cx,
+        y: cy,
+        noseX: noseX,
+        noseY: noseY,
+        w: w,
+        h: h,
+        area: w * h,
+        score: score
+    };
+}
+
+// Scores each detected face to accurately identify "MY FACE" (the signing user)
+function scoreCandidateFace(face, lastHandPos, now) {
+    // 1. Area score: User is close in foreground; background people are much smaller
+    const areaScore = Math.min(face.area, 0.25) * 8.0;
+
+    // 2. Centrality score: Primary user sits centered in front of the camera
+    const distCenter = Math.hypot(face.x - 0.5, face.y - 0.35);
+    const centerScore = Math.max(0, 1.0 - distCenter * 1.8) * 3.0;
+
+    // 3. Hand correlation score: User's face is directly above the hand that performed the sign
+    let handScore = 0;
+    if (lastHandPos && (now - lastHandPos.time < 8000)) {
+        const dx = Math.abs(face.x - lastHandPos.x);
+        handScore = Math.max(0, 1.0 - dx * 2.5) * 4.0;
+    }
+
+    // 4. Detection confidence score
+    const confScore = (face.score || 0.8) * 1.5;
+
+    return areaScore + centerScore + handScore + confScore;
+}
+
+// Helper: Draws crisp unmirrored text and rounded badges on a scaleX(-1) mirrored canvas
+function drawHUDLabel(ctx, text, x, y, options = {}) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(-1, 1); // Unmirror text horizontally
+
+    const font = `${options.fontWeight || 'bold'} ${options.fontSize || '11px'} Inter, -apple-system, system-ui, sans-serif`;
+    ctx.font = font;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    const textWidth = ctx.measureText(text).width;
+    const padX = options.paddingX || 10;
+    const padY = options.paddingY || 4;
+    const boxW = textWidth + padX * 2;
+    const boxH = 22;
+
+    ctx.fillStyle = options.bg || 'rgba(15, 23, 42, 0.85)';
+    if (ctx.roundRect) {
+        ctx.beginPath();
+        ctx.roundRect(-boxW / 2, -boxH / 2, boxW, boxH, 999);
+        ctx.fill();
+        if (options.border) {
+            ctx.strokeStyle = options.border;
+            ctx.lineWidth = 1.2;
+            ctx.stroke();
+        }
+    } else {
+        ctx.fillRect(-boxW / 2, -boxH / 2, boxW, boxH);
+    }
+
+    ctx.fillStyle = options.color || '#ffffff';
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+}
+
+function drawTextUnmirrored(ctx, text, x, y, options = {}) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(-1, 1);
+    ctx.font = options.font || 'bold 16px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    if (options.shadow) {
+        ctx.shadowColor = options.shadowColor || 'rgba(0,0,0,0.8)';
+        ctx.shadowBlur = 8;
+    }
+    ctx.fillStyle = options.fill || '#ffffff';
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+}
+
+// Draws subtle indicator over other (ignored) background faces
+function drawIgnoredFaceHUD(ctx, face, cw, ch) {
+    const x = (face.x - face.w / 2) * cw;
+    const y = (face.y - face.h / 2) * ch;
+    const w = face.w * cw;
+    const h = face.h * ch;
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeRect(x, y, w, h);
+    ctx.setLineDash([]);
+
+    const pillX = x + w / 2;
+    const pillY = Math.max(16, y - 8);
+    drawHUDLabel(ctx, 'Ignored Face', pillX, pillY, {
+        bg: 'rgba(30, 41, 59, 0.75)',
+        border: 'rgba(255, 255, 255, 0.2)',
+        color: 'rgba(203, 213, 225, 0.85)',
+        fontSize: '10px'
+    });
+    ctx.restore();
+}
+
+// Draws sleek glowing corner reticle and tracking anchor over locked user face
+function drawLockedUserFaceHUD(ctx, face, cw, ch, motionState, totalFaces) {
+    const cx = face.x * cw;
+    const cy = face.y * ch;
+    const nx = (face.noseX !== undefined ? face.noseX : face.x) * cw;
+    const ny = (face.noseY !== undefined ? face.noseY : face.y) * ch;
+    const w = face.w * cw;
+    const h = face.h * ch;
+    const x = cx - w / 2;
+    const y = cy - h / 2;
+
+    let themeColor = '#06b6d4'; // Cyan default
+    let glowColor = 'rgba(6, 182, 212, 0.6)';
+    let statusLabel = '🎯 YOUR FACE (LOCKED)';
+
+    if (motionState === 'nod') {
+        themeColor = '#10b981'; // Green
+        glowColor = 'rgba(16, 185, 129, 0.8)';
+        statusLabel = '↕️ NOD DETECTED ✓';
+    } else if (motionState === 'shake') {
+        themeColor = '#ef4444'; // Red
+        glowColor = 'rgba(239, 68, 68, 0.8)';
+        statusLabel = '↔️ SHAKE DETECTED ✗';
+    }
+
+    ctx.save();
+
+    // 1. High-tech Corner Brackets around Face
+    ctx.strokeStyle = themeColor;
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = 'round';
+    ctx.shadowColor = glowColor;
+    ctx.shadowBlur = 14;
+
+    const cornerLen = Math.min(w, h) * 0.24;
+
+    // Top-Left corner
+    ctx.beginPath();
+    ctx.moveTo(x, y + cornerLen);
+    ctx.lineTo(x, y);
+    ctx.lineTo(x + cornerLen, y);
+    ctx.stroke();
+
+    // Top-Right corner
+    ctx.beginPath();
+    ctx.moveTo(x + w - cornerLen, y);
+    ctx.lineTo(x + w, y);
+    ctx.lineTo(x + w, y + cornerLen);
+    ctx.stroke();
+
+    // Bottom-Left corner
+    ctx.beginPath();
+    ctx.moveTo(x, y + h - cornerLen);
+    ctx.lineTo(x, y + h);
+    ctx.lineTo(x + cornerLen, y + h);
+    ctx.stroke();
+
+    // Bottom-Right corner
+    ctx.beginPath();
+    ctx.moveTo(x + w - cornerLen, y + h);
+    ctx.lineTo(x + w, y + h);
+    ctx.lineTo(x + w, y + h - cornerLen);
+    ctx.stroke();
+
+    // 2. Tracking Anchor Dot on Nose
+    ctx.shadowBlur = 8;
+    ctx.fillStyle = themeColor;
+    ctx.beginPath();
+    ctx.arc(nx, ny, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 3. Target Crosshair Marks on Nose
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.beginPath();
+    ctx.moveTo(nx - 11, ny);
+    ctx.lineTo(nx - 4, ny);
+    ctx.moveTo(nx + 4, ny);
+    ctx.lineTo(nx + 11, ny);
+    ctx.moveTo(nx, ny - 11);
+    ctx.lineTo(nx, ny - 4);
+    ctx.moveTo(nx, ny + 4);
+    ctx.lineTo(nx, ny + 11);
+    ctx.stroke();
+
+    // 4. Vertical Nod arrows indicator
+    if (motionState === 'nod' || motionState === 'neutral') {
+        drawTextUnmirrored(ctx, '↕️', cx, y + h + 20, {
+            fill: themeColor,
+            shadow: true,
+            shadowColor: glowColor,
+            font: 'bold 16px Inter, sans-serif'
+        });
+    }
+
+    // 5. Unmirrored top header badge
+    const badgeText = totalFaces > 1 ? `${statusLabel} [1 of ${totalFaces}]` : statusLabel;
+    drawHUDLabel(ctx, badgeText, cx, Math.max(20, y - 14), {
+        bg: 'rgba(15, 23, 42, 0.90)',
+        border: themeColor,
+        color: '#ffffff',
+        fontSize: '11px',
+        fontWeight: 'bold',
+        paddingX: 12,
+        paddingY: 5
+    });
+
+    ctx.restore();
+}
+
+// Master Canvas HUD rendering for face confirmation
+function renderFaceTrackingHUD(primaryFace, faces) {
+    const canvas = document.getElementById('deaf-landmark-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const cw = canvas.width;
+    const ch = canvas.height;
+    ctx.clearRect(0, 0, cw, ch);
+
+    if (!primaryFace && (!faces || faces.length === 0)) return;
+
+    // Determine current motion status for dynamic visual feedback
+    let motionState = 'neutral';
+    const gaugeStatus = document.getElementById('head-gauge-status');
+    const statusText = gaugeStatus ? gaugeStatus.textContent : '';
+    if (statusText.includes('Nodding') || statusText.includes('Nod Detected')) {
+        motionState = 'nod';
+    } else if (statusText.includes('Shaking') || statusText.includes('Shake Detected')) {
+        motionState = 'shake';
+    }
+
+    // 1. Draw other (ignored) faces in subtle translucent dashed styling
+    if (faces && faces.length > 1) {
+        for (const f of faces) {
+            if (primaryFace && Math.hypot(f.x - primaryFace.x, f.y - primaryFace.y) < 0.15) {
+                continue;
+            }
+            drawIgnoredFaceHUD(ctx, f, cw, ch);
+        }
+    }
+
+    // 2. Draw locked user face with high-tech reticle
+    if (primaryFace) {
+        drawLockedUserFaceHUD(ctx, primaryFace, cw, ch, motionState, faces ? faces.length : 1);
+    }
 }
 
 // ============ HEAD MOVEMENT GESTURE RECOGNITION ============
 function onFaceResults(results) {
-    if (!awaitingHeadConfirmation) return;
+    if (!awaitingHeadConfirmation) {
+        lockedUserFace = null;
+        return;
+    }
+
+    const now = Date.now();
+    const faces = [];
     if (results.detections && results.detections.length > 0) {
-        const det = results.detections[0];
-        // Nose tip is landmark 2 in MediaPipe FaceDetection
-        let x, y;
-        if (det.landmarks && det.landmarks[2]) {
-            x = det.landmarks[2].x;
-            y = det.landmarks[2].y;
-        } else if (det.boundingBox) {
-            x = det.boundingBox.xCenter;
-            y = det.boundingBox.yCenter;
+        for (const det of results.detections) {
+            const f = normalizeFaceDetection(det);
+            if (f) faces.push(f);
         }
-        if (x !== undefined && y !== undefined) {
-            trackHeadCoordinates(x, y);
-            return;
+    }
+    activeFaceList = faces;
+
+    let primaryFace = null;
+
+    if (faces.length > 0) {
+        // Case A: A lock is already established and was seen recently (< 800ms)
+        if (lockedUserFace && (now - lockedUserFace.lastSeen < 800)) {
+            let minDist = Infinity;
+            let closest = null;
+            for (const f of faces) {
+                const dist = Math.hypot(f.x - lockedUserFace.x, f.y - lockedUserFace.y);
+                if (dist < minDist) {
+                    minDist = dist;
+                    closest = f;
+                }
+            }
+
+            // Head nodding naturally stays within ~0.22 normalized distance
+            if (closest && minDist < 0.22) {
+                // Smooth tracking update (EMA)
+                lockedUserFace.x = lockedUserFace.x * 0.35 + closest.x * 0.65;
+                lockedUserFace.y = lockedUserFace.y * 0.35 + closest.y * 0.65;
+                lockedUserFace.noseX = closest.noseX;
+                lockedUserFace.noseY = closest.noseY;
+                lockedUserFace.w = closest.w;
+                lockedUserFace.h = closest.h;
+                lockedUserFace.lastSeen = now;
+                lockedUserFace.score = closest.score;
+                primaryFace = lockedUserFace;
+                trackHeadCoordinates(closest.noseX, closest.noseY);
+            } else if (now - lockedUserFace.lastSeen < 500) {
+                // Briefly occluded or extreme nod angle: maintain lock position
+                primaryFace = lockedUserFace;
+            }
+        }
+
+        // Case B: No active lock or previous lock expired
+        if (!primaryFace) {
+            let bestScore = -Infinity;
+            let bestFace = null;
+            for (const f of faces) {
+                const s = scoreCandidateFace(f, lastSigningHandPos, now);
+                if (s > bestScore) {
+                    bestScore = s;
+                    bestFace = f;
+                }
+            }
+
+            if (bestFace) {
+                lockedUserFace = {
+                    x: bestFace.x,
+                    y: bestFace.y,
+                    noseX: bestFace.noseX,
+                    noseY: bestFace.noseY,
+                    w: bestFace.w,
+                    h: bestFace.h,
+                    lastSeen: now,
+                    score: bestFace.score,
+                    locked: true
+                };
+                primaryFace = lockedUserFace;
+                trackHeadCoordinates(bestFace.noseX, bestFace.noseY);
+            }
+        }
+    } else {
+        // No faces returned in this frame by FaceDetection
+        if (lockedUserFace && (now - lockedUserFace.lastSeen < 600)) {
+            primaryFace = lockedUserFace;
+        } else {
+            // Optical fallback
+            const video = document.getElementById('deaf-camera-feed');
+            if (video) processOpticalHeadMovement(video);
         }
     }
 
-    // Fallback: optical tracking on video element
-    const video = document.getElementById('deaf-camera-feed');
-    if (video) processOpticalHeadMovement(video);
+    // Update UI Badges & Text in Confirmation Overlay
+    const targetBadge = document.getElementById('deaf-face-target-badge');
+    const targetText = document.getElementById('deaf-face-target-text');
+    if (targetBadge && targetText) {
+        if (primaryFace) {
+            targetBadge.classList.add('locked');
+            if (faces.length > 1) {
+                targetText.textContent = `🎯 Face Locked (Ignoring ${faces.length - 1} other${faces.length > 2 ? 's' : ''})`;
+            } else {
+                targetText.textContent = '🎯 Your Face Locked';
+            }
+        } else {
+            targetBadge.classList.remove('locked');
+            targetText.textContent = '🔍 Locating your face...';
+        }
+    }
+
+    // Render Canvas HUD with face target lock
+    renderFaceTrackingHUD(primaryFace, faces);
 }
 
-// Fallback: Fast optical brightness centroid tracker in upper-center region
+// Fallback: Fast optical brightness centroid tracker centered on user position
 function processOpticalHeadMovement(video) {
     if (!video || video.readyState < 2) return;
     if (!offscreenCanvas) {
@@ -582,10 +973,13 @@ function processOpticalHeadMovement(video) {
 
     const vw = video.videoWidth || 640;
     const vh = video.videoHeight || 480;
-    // Upper-center quadrant (head position)
+    // Align fallback quadrant with user's signing position if known
+    const userCenterX = lastSigningHandPos ? lastSigningHandPos.x : 0.5;
+    const cropX = Math.max(0, Math.min(vw - vw * 0.45, (userCenterX - 0.225) * vw));
+
     offscreenCtx.drawImage(
         video,
-        vw * 0.25, vh * 0.05, vw * 0.5, vh * 0.45,
+        cropX, vh * 0.05, vw * 0.45, vh * 0.45,
         0, 0, 64, 64
     );
     const imgData = offscreenCtx.getImageData(0, 0, 64, 64);
@@ -605,8 +999,8 @@ function processOpticalHeadMovement(video) {
     }
 
     if (totalWeight > 0) {
-        const cx = sumX / (totalWeight * 64);
-        const cy = sumY / (totalWeight * 64);
+        const cx = (cropX / vw) + (sumX / (totalWeight * 64)) * 0.45;
+        const cy = 0.05 + (sumY / (totalWeight * 64)) * 0.45;
         trackHeadCoordinates(cx, cy);
     }
 }
@@ -664,7 +1058,7 @@ function trackHeadCoordinates(x, y) {
     }
 
     // 1. NOD DETECTED (Up and Down motion) -> YES / CORRECT
-    if (rangeY > 0.032 && yReversals >= 1 && rangeY > rangeX * 1.15) {
+    if (rangeY > 0.028 && yReversals >= 1 && rangeY > rangeX * 1.10) {
         if (gaugeStatus) gaugeStatus.innerHTML = '<strong style="color:#34d399">↕️ Nod Detected! Confirmed ✓</strong>';
         if (gaugeDot) gaugeDot.style.background = '#10b981';
         resolveHeadConfirmation(true);
@@ -672,7 +1066,7 @@ function trackHeadCoordinates(x, y) {
     }
 
     // 2. SHAKE DETECTED (Left and Right motion) -> NO / WRONG
-    if (rangeX > 0.040 && xReversals >= 1 && rangeX > rangeY * 1.15) {
+    if (rangeX > 0.038 && xReversals >= 1 && rangeX > rangeY * 1.15) {
         if (gaugeStatus) gaugeStatus.innerHTML = '<strong style="color:#f87171">↔️ Shake Detected! Cancelled ✗</strong>';
         if (gaugeDot) gaugeDot.style.background = '#ef4444';
         resolveHeadConfirmation(false);
@@ -680,9 +1074,9 @@ function trackHeadCoordinates(x, y) {
     }
 
     if (gaugeStatus) {
-        if (rangeY > rangeX) {
+        if (rangeY > rangeX && rangeY > 0.012) {
             gaugeStatus.textContent = 'Moving vertically (Nodding)...';
-        } else if (rangeX > rangeY) {
+        } else if (rangeX > rangeY && rangeX > 0.012) {
             gaugeStatus.textContent = 'Moving horizontally (Shaking)...';
         } else {
             gaugeStatus.textContent = 'Nod head (Up & Down) to confirm';
@@ -695,6 +1089,15 @@ function resolveHeadConfirmation(isConfirmed) {
     if (!awaitingHeadConfirmation) return;
     awaitingHeadConfirmation = false;
     headHistory = [];
+    lockedUserFace = null;
+    activeFaceList = [];
+
+    // Clear canvas face reticle
+    const canvas = document.getElementById('deaf-landmark-canvas');
+    if (canvas) {
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
 
     const overlay = document.getElementById('deaf-confirm-overlay');
     if (overlay) overlay.style.display = 'none';
@@ -868,6 +1271,47 @@ async function startDeafCamera() {
         deafCamera.start();
         isDeafCamOn = true;
         if (camBtn) camBtn.classList.add('active');
+
+        // Optional tap/click on video feed to manually lock onto face
+        const cameraContainer = document.getElementById('deaf-camera-container');
+        if (cameraContainer && !cameraContainer._faceClickListenerAttached) {
+            cameraContainer._faceClickListenerAttached = true;
+            cameraContainer.addEventListener('click', (e) => {
+                if (!awaitingHeadConfirmation || !activeFaceList || activeFaceList.length === 0) return;
+                // Ignore clicks on confirm buttons or cards
+                if (e.target.closest('.confirm-action-btn') || e.target.closest('.confirm-card')) return;
+
+                const rect = cameraContainer.getBoundingClientRect();
+                // Since canvas and video are mirrored with scaleX(-1):
+                const clickX = 1.0 - ((e.clientX - rect.left) / rect.width);
+                const clickY = (e.clientY - rect.top) / rect.height;
+
+                let closest = null;
+                let minDist = Infinity;
+                for (const f of activeFaceList) {
+                    const d = Math.hypot(f.x - clickX, f.y - clickY);
+                    if (d < minDist) {
+                        minDist = d;
+                        closest = f;
+                    }
+                }
+
+                if (closest && minDist < 0.35) {
+                    lockedUserFace = {
+                        x: closest.x,
+                        y: closest.y,
+                        noseX: closest.noseX,
+                        noseY: closest.noseY,
+                        w: closest.w,
+                        h: closest.h,
+                        lastSeen: Date.now(),
+                        score: closest.score,
+                        locked: true
+                    };
+                    showToast('🎯 Manually locked onto your face');
+                }
+            });
+        }
     } catch (err) {
         console.warn('Deaf camera permission denied:', err);
         if (noCam) noCam.style.display = 'flex';
